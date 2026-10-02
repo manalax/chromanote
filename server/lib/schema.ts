@@ -2,6 +2,9 @@ import type { AppKitInstance } from './appkit';
 
 export const EMBEDDING_DIM = 1024;
 
+/** Columns on the notes board (see shared order: board_col, then sort_order). */
+export const BOARD_COLUMNS = 4;
+
 /** SQL twin of normalizeTitle() in shared/wikilinks.ts. */
 export const normTitle = (col: string) => `regexp_replace(lower(trim(${col})), '\\s+', ' ', 'g')`;
 
@@ -110,6 +113,15 @@ const STATEMENTS = [
    ) r
    WHERE chromanote.notes.id = r.id`,
   `CREATE INDEX IF NOT EXISTS notes_user_sort_idx ON chromanote.notes (user_id, sort_order)`,
+  // Board column (0..BOARD_COLUMNS-1) for the Custom order board. Existing notes
+  // are dealt round-robin in custom order, matching the previous masonry layout.
+  addColumn('notes', 'board_col', 'SMALLINT'),
+  `UPDATE chromanote.notes SET board_col = (r.rn - 1) % ${BOARD_COLUMNS}
+   FROM (
+     SELECT id, row_number() OVER (PARTITION BY user_id ORDER BY sort_order ASC NULLS LAST, updated_at DESC) AS rn
+     FROM chromanote.notes WHERE board_col IS NULL
+   ) r
+   WHERE chromanote.notes.id = r.id`,
 ];
 
 export async function setupSchema(appkit: AppKitInstance) {

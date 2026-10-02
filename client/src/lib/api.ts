@@ -25,6 +25,8 @@ interface NoteBase {
 
 export interface NoteSummary extends NoteBase {
   excerpt: string;
+  /** Board column for the Custom order board. */
+  board_col: number | null;
 }
 
 export interface Note extends NoteBase {
@@ -138,10 +140,10 @@ export const api = {
   trashNote: (id: string) => request<void>('DELETE', `/api/notes/${id}`),
   restoreNote: (id: string) => request<Note>('POST', `/api/notes/${id}/restore`),
   deleteNoteForever: (id: string) => request<void>('DELETE', `/api/notes/${id}/permanent`),
-  moveNote: (id: string, beforeId: string | null, afterId: string | null) =>
-    request<{ id: string; sort_order: number }>('POST', `/api/notes/${id}/move`, {
+  moveNote: (id: string, column: number, beforeId: string | null) =>
+    request<{ id: string; sort_order: number; board_col: number }>('POST', `/api/notes/${id}/move`, {
+      column,
       before_id: beforeId,
-      after_id: afterId,
     }),
   emptyTrash: () => request<void>('DELETE', '/api/notes/trash'),
   backlinks: (id: string) => request<NoteRef[]>('GET', `/api/notes/${id}/backlinks`),

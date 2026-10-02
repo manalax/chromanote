@@ -1,59 +1,33 @@
 import { useRef, useState } from 'react';
-import {
-  DndContext,
-  DragOverlay,
-  KeyboardSensor,
-  PointerSensor,
-  TouchSensor,
-  closestCenter,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from '@dnd-kit/core';
-import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable } from '@dnd-kit/sortable';
+import { DndContext, DragOverlay, closestCenter, type DragEndEvent } from '@dnd-kit/core';
+import { SortableContext, useSortable } from '@dnd-kit/sortable';
 import type { NoteSummary } from '@/lib/api';
+import { useNoteSensors } from '@/lib/dnd';
 import { cn } from '@/lib/utils';
 import { MasonryGrid } from './MasonryGrid';
 import { NoteCard } from './NoteCard';
 
 /**
- * Cards don't slide around while dragging: with uneven masonry heights the
- * target would keep moving away from the pointer. Instead the card under the
- * pointer is highlighted and the order changes on drop.
+ * Auto-flowing masonry used for search results and non-custom sorts. Cards
+ * don't slide around while dragging (with uneven heights the target would keep
+ * moving away from the pointer); the card under the pointer is highlighted and
+ * the dragged note is placed above it on the board when dropped.
  */
 const noShiftStrategy = () => null;
 
-/**
- * Mouse and pen only: touches go to the TouchSensor, whose long-press delay
- * lets a quick swipe scroll the page. (The default PointerSensor would claim
- * touches too, and the browser then cancels them as a scroll.)
- */
-class MouseSensor extends PointerSensor {
-  static activators = [
-    {
-      eventName: 'onPointerDown' as const,
-      handler: ({ nativeEvent: e }: React.PointerEvent) => e.pointerType !== 'touch' && e.isPrimary && e.button === 0,
-    },
-  ];
-}
-
 interface SortableNotesProps {
   notes: NoteSummary[];
-  /** Called with the new order and the moved note's new neighbours. */
-  onMove: (next: NoteSummary[], id: string, beforeId: string | null, afterId: string | null) => void;
+  /** Called when `id` is dropped onto the card `targetId`. */
+  onDropOnto: (id: string, targetId: string) => void;
 }
 
-export function SortableNotes({ notes, onMove }: SortableNotesProps) {
+export function SortableNotes({ notes, onDropOnto }: SortableNotesProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
   // The click that ends a drag must not open the note.
   const suppressClick = useRef(false);
 
-  const sensors = useSensors(
-    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
-  );
+  const sensors = useNoteSensors();
 
   const reset = () => {
     setActiveId(null);
@@ -65,11 +39,7 @@ export function SortableNotes({ notes, onMove }: SortableNotesProps) {
     suppressClick.current = true;
     setTimeout(() => (suppressClick.current = false), 0);
     if (!over || over.id === active.id) return;
-    const from = notes.findIndex((n) => n.id === active.id);
-    const to = notes.findIndex((n) => n.id === over.id);
-    if (from < 0 || to < 0) return;
-    const next = arrayMove(notes, from, to);
-    onMove(next, String(active.id), next[to - 1]?.id ?? null, next[to + 1]?.id ?? null);
+    onDropOnto(String(active.id), String(over.id));
   };
 
   const active = notes.find((n) => n.id === activeId);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { columnCount, distributeColumns } from './masonry';
+import { boardLayout, columnCount, distributeColumns, groupByColumn } from './masonry';
 
 describe('distributeColumns', () => {
   it('deals items round-robin so order reads left to right', () => {
@@ -26,5 +26,33 @@ describe('columnCount', () => {
     expect(columnCount(600)).toBe(2);
     expect(columnCount(900)).toBe(3);
     expect(columnCount(1200)).toBe(4);
+  });
+});
+
+describe('boardLayout', () => {
+  it('shows each board column in its own screen column when there is room', () => {
+    expect(boardLayout(4)).toEqual([[0], [1], [2], [3]]);
+  });
+
+  it('stacks board columns in order on narrower screens', () => {
+    expect(boardLayout(2)).toEqual([
+      [0, 2],
+      [1, 3],
+    ]);
+    expect(boardLayout(3)).toEqual([[0, 3], [1], [2]]);
+    expect(boardLayout(1)).toEqual([[0, 1, 2, 3]]);
+  });
+});
+
+describe('groupByColumn', () => {
+  it('keeps order within each column and clamps out-of-range columns', () => {
+    const notes = [
+      { id: 'a', board_col: 1 },
+      { id: 'b', board_col: 0 },
+      { id: 'c', board_col: 1 },
+      { id: 'd', board_col: 9 },
+      { id: 'e', board_col: null },
+    ];
+    expect(groupByColumn(notes)).toEqual([['b', 'e'], ['a', 'c'], [], ['d']]);
   });
 });

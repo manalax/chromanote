@@ -3,7 +3,7 @@ import { parseWikilinks } from '../../shared/wikilinks';
 import { type AppKitInstance, HttpError, getUserId, route } from '../lib/appkit';
 import { removeChunks, scheduleReindex } from '../lib/rag';
 import { positionBetween } from '../lib/order';
-import { normTitle } from '../lib/schema';
+import { BOARD_COLUMNS, normTitle } from '../lib/schema';
 
 const Id = z.string().uuid();
 const Color = z.string().regex(/^(#[0-9a-fA-F]{6}|[a-z]+)$/);
@@ -37,8 +37,13 @@ const UpdateNoteBody = z
   .partial();
 
 const MoveBody = z.object({
-  before_id: Id.nullable().optional(),
-  after_id: Id.nullable().optional(),
+  column: z
+    .number()
+    .int()
+    .min(0)
+    .max(BOARD_COLUMNS - 1),
+  /** The note to place this one directly above, in `column`; null = bottom of the column. */
+  before_id: Id.nullable(),
 });
 
 const ListQuery = z.object({
@@ -55,7 +60,7 @@ const TAGS_JSON = `COALESCE((
   FROM chromanote.note_tags nt JOIN chromanote.tags t ON t.id = nt.tag_id
   WHERE nt.note_id = n.id), '[]'::json) AS tags`;
 
-const SUMMARY_COLUMNS = `n.id, n.title, left(n.body, 600) AS excerpt, n.color, n.text_color, n.font, n.priority, n.due_at,
+const SUMMARY_COLUMNS = `n.id, n.title, left(n.body, 600) AS excerpt, n.board_col, n.color, n.text_color, n.font, n.priority, n.due_at,
   n.archived_at, n.deleted_at, n.created_at, n.updated_at, ${TAGS_JSON}`;
 
 const FULL_COLUMNS = `n.id, n.title, n.body, n.color, n.text_color, n.font, n.priority, n.due_at,
@@ -111,9 +116,9 @@ export async function createNote(appkit: AppKitInstance, userId: string, input: 
   const { rows } = await appkit.lakebase.query<{ id: string }>(
     // New notes go to the top of the custom order.
     `INSERT INTO chromanote.notes
-       (user_id, title, body, color, text_color, font, priority, due_at, graph_x, graph_y, sort_order)
+       (user_id, title, body, color, text_color, font, priority, due_at, graph_x, graph_y, sort_order, board_col)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-       (SELECT COALESCE(MIN(sort_order), 1) - 1 FROM chromanote.notes WHERE user_id = $1))
+       (SELECT COALESCE(MIN(sort_order), 1) - 1 FROM chromanote.notes WHERE user_id = $1), 0)
      RETURNING id`,
     [
       userId,
@@ -346,28 +351,35 @@ export function registerNoteRoutes(appkit: AppKitInstance) {
 
     app.post(
       '/api/notes/:id/move',
-      route('reorder note', async (req, res) => {
+      route('move note', async (req, res) => {
         const userId = getUserId(req);
         const id = parseId(req.params.id);
         const parsed = MoveBody.safeParse(req.body);
-        if (!parsed.success) throw new HttpError(400, 'before_id and after_id must be note ids or null');
-        const { before_id, after_id } = parsed.data;
-        if (before_id === id || after_id === id) throw new HttpError(400, 'A note cannot be its own neighbour');
+        if (!parsed.success) throw new HttpError(400, `column (0-${BOARD_COLUMNS - 1}) and before_id are required`);
+        const { column, before_id } = parsed.data;
+        if (before_id === id) throw new HttpError(400, 'A note cannot be placed above itself');
 
-        const neighbourOrder = async () => {
-          const ids = [id, before_id, after_id].filter((x): x is string => !!x);
-          const { rows } = await appkit.lakebase.query<{ id: string; sort_order: number | null }>(
-            'SELECT id, sort_order FROM chromanote.notes WHERE user_id = $1 AND id = ANY($2::uuid[])',
+        // Sort key just above `before_id` (or at the bottom of the column).
+        const target = async () => {
+          const ids = [id, ...(before_id ? [before_id] : [])];
+          const { rows } = await appkit.lakebase.query<{ id: string; sort_order: number; board_col: number }>(
+            'SELECT id, sort_order, board_col FROM chromanote.notes WHERE user_id = $1 AND id = ANY($2::uuid[])',
             [userId, ids]
           );
-          const byId = new Map(rows.map((r) => [r.id, r.sort_order]));
-          if (ids.some((x) => !byId.has(x))) throw new HttpError(404, 'Note not found');
-          return positionBetween(before_id ? byId.get(before_id)! : null, after_id ? byId.get(after_id)! : null);
+          if (rows.length !== ids.length) throw new HttpError(404, 'Note not found');
+          const before = rows.find((r) => r.id === before_id);
+          if (before && before.board_col !== column) throw new HttpError(400, 'before_id is in a different column');
+          const { rows: above } = await appkit.lakebase.query<{ sort_order: number | null }>(
+            `SELECT MAX(sort_order) AS sort_order FROM chromanote.notes
+             WHERE user_id = $1 AND board_col = $2 AND id <> $3 ${before ? 'AND sort_order < $4' : ''}`,
+            before ? [userId, column, id, before.sort_order] : [userId, column, id]
+          );
+          return positionBetween(above[0]?.sort_order ?? null, before?.sort_order ?? null);
         };
 
-        let position = await neighbourOrder();
+        let position = await target();
         if (position === null) {
-          // Neighbours too close together (or out of order): renumber, then retry.
+          // Neighbours too close together: renumber, then retry.
           await appkit.lakebase.query(
             `UPDATE chromanote.notes SET sort_order = r.rn
              FROM (SELECT id, row_number() OVER (ORDER BY sort_order ASC NULLS LAST, updated_at DESC) AS rn
@@ -375,15 +387,14 @@ export function registerNoteRoutes(appkit: AppKitInstance) {
              WHERE chromanote.notes.id = r.id`,
             [userId]
           );
-          position = (await neighbourOrder()) ?? 0;
+          position = (await target()) ?? 0;
         }
-        // Reordering is layout, not an edit, so updated_at is left alone.
-        await appkit.lakebase.query('UPDATE chromanote.notes SET sort_order = $3 WHERE id = $1 AND user_id = $2', [
-          id,
-          userId,
-          position,
-        ]);
-        res.json({ id, sort_order: position });
+        // Moving is layout, not an edit, so updated_at is left alone.
+        await appkit.lakebase.query(
+          'UPDATE chromanote.notes SET sort_order = $3, board_col = $4 WHERE id = $1 AND user_id = $2',
+          [id, userId, position, column]
+        );
+        res.json({ id, sort_order: position, board_col: column });
       })
     );
 

@@ -21,6 +21,7 @@ import {
 import { api, type NoteFilters, type NoteSummary, type Priority } from '@/lib/api';
 import { accentOf } from '@/lib/colors';
 import { useData } from '@/lib/data';
+import { NotesBoard } from '@/components/NotesBoard';
 import { SortableNotes } from '@/components/SortableNotes';
 import { PRIORITIES } from '@/lib/meta';
 
@@ -98,18 +99,31 @@ export function NotesGrid() {
     setParams({}, { replace: true });
   };
 
-  const moveNote = async (next: NoteSummary[], id: string, beforeId: string | null, afterId: string | null) => {
-    setNotes(next);
+  // The Custom order board is shown for the unfiltered Custom sort.
+  const boardMode = filters.sort === 'custom' && !hasFilters;
+
+  const moveOnBoard = async (id: string, column: number, beforeId: string | null) => {
     try {
-      await api.moveNote(id, beforeId, afterId);
-      // Dragging defines a custom order, so show it (this reloads from the server).
-      if (filters.sort !== 'custom') {
-        setParam('sort', ALL);
-        toast('Switched to Custom order');
-      }
+      await api.moveNote(id, column, beforeId);
     } catch (err) {
       toast.error((err as Error).message);
+      throw err;
+    } finally {
       setReload((n) => n + 1);
+    }
+  };
+
+  /** In search results or other sorts: place the note above the card it was dropped on, then show the board. */
+  const dropOnto = async (id: string, targetId: string) => {
+    const target = notes?.find((n) => n.id === targetId);
+    if (!target) return;
+    try {
+      await api.moveNote(id, target.board_col ?? 0, targetId);
+      setQ('');
+      setParams({}, { replace: true });
+      toast('Moved. Showing your Custom order board');
+    } catch (err) {
+      toast.error((err as Error).message);
     }
   };
 
@@ -249,8 +263,10 @@ export function NotesGrid() {
             )}
           </EmptyContent>
         </Empty>
+      ) : boardMode ? (
+        <NotesBoard notes={notes} onMove={moveOnBoard} />
       ) : (
-        <SortableNotes notes={notes} onMove={(...args) => void moveNote(...args)} />
+        <SortableNotes notes={notes} onDropOnto={(id, target) => void dropOnto(id, target)} />
       )}
     </div>
   );
