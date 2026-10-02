@@ -1,0 +1,103 @@
+@import '@databricks/appkit-ui/styles.css';
+@plugin "@tailwindcss/typography";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  /* App background chosen in Settings; falls back to the theme background. */
+  --app-bg: var(--background);
+}
+
+html,
+body {
+  font-family: var(--font-sans);
+  background: var(--app-bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Rendered markdown */
+.note-prose {
+  color: inherit;
+  max-width: none;
+  --tw-prose-body: currentColor;
+  --tw-prose-headings: currentColor;
+  --tw-prose-bold: currentColor;
+  --tw-prose-links: currentColor;
+  --tw-prose-quotes: currentColor;
+  --tw-prose-code: currentColor;
+  --tw-prose-bullets: color-mix(in oklab, currentColor 45%, transparent);
+  --tw-prose-counters: color-mix(in oklab, currentColor 60%, transparent);
+  --tw-prose-hr: color-mix(in oklab, currentColor 15%, transparent);
+  --tw-prose-quote-borders: color-mix(in oklab, currentColor 20%, transparent);
+  --tw-prose-th-borders: color-mix(in oklab, currentColor 20%, transparent);
+  --tw-prose-td-borders: color-mix(in oklab, currentColor 12%, transparent);
+  --tw-prose-pre-bg: color-mix(in oklab, currentColor 7%, transparent);
+  --tw-prose-pre-code: currentColor;
+}
+.note-prose :where(code):not(:where(pre *)) {
+  background: color-mix(in oklab, currentColor 8%, transparent);
+  border-radius: 0.3rem;
+  padding: 0.1rem 0.3rem;
+  font-weight: 500;
+}
+.note-prose :where(code):not(:where(pre *))::before,
+.note-prose :where(code):not(:where(pre *))::after {
+  content: none;
+}
+.note-prose img {
+  border-radius: 0.5rem;
+}
+.note-prose a.wikilink {
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in oklab, currentColor 40%, transparent);
+  font-weight: 500;
+}
+.note-prose a.wikilink.missing {
+  opacity: 0.55;
+  border-bottom-style: dashed;
+}
+
+/* CodeMirror inherits the note's font and colours */
+.cm-editor {
+  background: transparent !important;
+  font-size: 0.95rem;
+  height: 100%;
+}
+.cm-editor.cm-focused {
+  outline: none !important;
+}
+.cm-editor .cm-scroller {
+  font-family: inherit;
+  line-height: 1.7;
+}
+.cm-editor .cm-content {
+  caret-color: currentColor;
+  padding: 0;
+  /* Fill the pane so clicking empty space below the text focuses the editor. */
+  min-height: 100%;
+}
+.cm-editor .cm-gutters {
+  display: none;
+}
+.cm-editor .cm-activeLine {
+  background: transparent;
+}
+.cm-editor .cm-selectionBackground,
+.cm-editor.cm-focused .cm-selectionBackground {
+  background: color-mix(in oklab, currentColor 18%, transparent) !important;
+}
+.cm-editor .cm-cursor {
+  border-left-color: currentColor;
+}
+.cm-tooltip-autocomplete {
+  border-radius: 0.5rem;
+  overflow: hidden;
+  border: 1px solid var(--border) !important;
+  background: var(--popover) !important;
+  color: var(--popover-foreground);
+}
+.cm-tooltip-autocomplete ul li[aria-selected] {
+  background: var(--accent) !important;
+  color: var(--accent-foreground) !important;
+}

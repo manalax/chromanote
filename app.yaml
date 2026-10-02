@@ -1,0 +1,10 @@
+command: ['npm', 'run', 'start']
+env:
+  - name: LAKEBASE_ENDPOINT
+    valueFrom: postgres
+  - name: DATABRICKS_VOLUME_FILES
+    value: /Volumes/workspace/chromanote/images
+  - name: DATABRICKS_CHAT_ENDPOINT
+    valueFrom: chat-endpoint
+  - name: DATABRICKS_EMBEDDING_ENDPOINT
+    valueFrom: embedding-endpoint
