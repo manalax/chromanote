@@ -2,6 +2,7 @@ import { createApp, files, lakebase, server } from '@databricks/appkit';
 import type { AppKitInstance } from './lib/appkit';
 import { setupSchema } from './lib/schema';
 import { registerAssistantRoutes } from './routes/assistant';
+import { registerDictationRoutes } from './routes/dictation';
 import { registerGraphRoutes } from './routes/graph';
 import { registerImageRoutes } from './routes/images';
 import { registerNoteRoutes } from './routes/notes';
@@ -31,5 +32,6 @@ createApp({
     registerSettingsRoutes(app);
     registerImageRoutes(app);
     registerAssistantRoutes(app);
+    registerDictationRoutes(app);
   },
 }).catch(console.error);

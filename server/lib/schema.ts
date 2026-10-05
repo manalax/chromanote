@@ -102,6 +102,7 @@ const STATEMENTS = [
   // even when it would be a no-op, so only alter when the column is missing.
   addColumn('notes', 'text_color', 'TEXT'),
   addColumn('user_settings', 'default_text_color', 'TEXT'),
+  addColumn('user_settings', 'dictation_lang', 'TEXT'),
   addColumn('notes', 'graph_x', 'DOUBLE PRECISION'),
   addColumn('notes', 'graph_y', 'DOUBLE PRECISION'),
   addColumn('notes', 'sort_order', 'DOUBLE PRECISION'),

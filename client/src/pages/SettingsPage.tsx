@@ -1,7 +1,17 @@
 import { useState } from 'react';
 import { Check, Monitor, Moon, Pencil, Sun, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { Button, Input, ToggleGroup, ToggleGroupItem } from '@databricks/appkit-ui/react';
+import {
+  Button,
+  Input,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  ToggleGroup,
+  ToggleGroupItem,
+} from '@databricks/appkit-ui/react';
 import { api, type Tag } from '@/lib/api';
 import {
   BACKGROUND_SWATCHES,
@@ -17,6 +27,8 @@ import { FONTS } from '@/lib/fonts';
 import { useSettings } from '@/lib/settings';
 import { cn } from '@/lib/utils';
 import { ColorPicker } from '@/components/ColorPicker';
+import { DICTATION_LANGUAGES, dictationSupported } from '@/lib/dictation/languages';
+import { useDictationLang } from '@/lib/dictation/useDictation';
 
 function Section({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
   return (
@@ -174,6 +186,10 @@ export function SettingsPage() {
           />
         </Section>
 
+        <Section title="Dictation language" description="The language you speak when dictating notes and questions.">
+          <DictationLanguage />
+        </Section>
+
         <Section title="Tags" description="Rename, recolour or delete tags. Deleting a tag doesn't delete notes.">
           <TagManager />
         </Section>
@@ -284,5 +300,41 @@ function TagRow({ tag, onChanged }: { tag: Tag; onChanged: () => void }) {
         </>
       )}
     </li>
+  );
+}
+
+const BROWSER_DEFAULT = 'browser';
+
+function DictationLanguage() {
+  const { settings, update } = useSettings();
+  const effective = useDictationLang();
+  const value = settings.dictation_lang ?? BROWSER_DEFAULT;
+  const browserLabel = DICTATION_LANGUAGES.find((l) => l.tag === effective)?.label ?? effective;
+  return (
+    <div className="space-y-2">
+      <Select value={value} onValueChange={(v) => void update({ dictation_lang: v === BROWSER_DEFAULT ? null : v })}>
+        <SelectTrigger className="w-64" aria-label="Dictation language">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={BROWSER_DEFAULT}>Browser default ({browserLabel})</SelectItem>
+          {DICTATION_LANGUAGES.map((l) => (
+            <SelectItem key={l.tag} value={l.tag}>
+              {l.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {!effective.toLowerCase().startsWith('en') && (
+        <p className="text-sm text-muted-foreground">
+          Spoken commands like “period” and “new line” only work in English; punctuation is still added when you stop.
+        </p>
+      )}
+      {!dictationSupported() && (
+        <p className="text-sm text-muted-foreground">
+          Dictation needs Chrome, Edge or Safari. This browser doesn&apos;t support speech recognition.
+        </p>
+      )}
+    </div>
   );
 }

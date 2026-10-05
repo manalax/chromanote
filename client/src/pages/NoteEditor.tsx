@@ -56,6 +56,8 @@ import { DueBadge, PriorityFlag, TagChip } from '@/components/NoteMeta';
 import { PRIORITIES, formatDateTime, formatDue, formatRelative } from '@/lib/meta';
 import { useNow } from '@/lib/useNow';
 import { TagPicker } from '@/components/TagPicker';
+import { MicButton } from '@/components/MicButton';
+import { useDictation } from '@/lib/dictation/useDictation';
 
 const AUTOSAVE_MS = 800;
 type View = 'split' | 'edit' | 'preview';
@@ -84,6 +86,37 @@ export function NoteEditor() {
   const [view, setView] = useState<View>('split');
   const [backlinks, setBacklinks] = useState<NoteRef[]>([]);
   const editorRef = useRef<MarkdownEditorHandle>(null);
+
+  // Dictation: words go live into the editor; on stop the dictated text is tidied.
+  const dictation = useDictation({
+    onInterim: (text) => editorRef.current?.dictation.interim(text),
+    onFinal: (text) => editorRef.current?.dictation.final(text),
+    onStop: async () => {
+      const span = editorRef.current?.dictation.end();
+      if (!span?.text.trim()) return;
+      // Tidy only the words; keep the surrounding whitespace as inserted.
+      const [, lead, core, trail] = /^(\s*)([\s\S]*?)(\s*)$/.exec(span.text)!;
+      const { text, changed } = await api.tidyDictation(core, dictation.lang);
+      if (changed && !editorRef.current?.dictation.replace(span, lead + text + trail)) {
+        toast('Kept your dictated text as-is because it was edited while tidying');
+      }
+    },
+  });
+  const toggleDictation = () => {
+    if (dictation.state !== 'idle') {
+      dictation.toggle();
+      return;
+    }
+    const begin = () => {
+      editorRef.current?.dictation.start();
+      dictation.toggle();
+    };
+    // The editor must be visible to dictate into it.
+    if (view === 'preview') {
+      setView(isMobile ? 'edit' : 'split');
+      setTimeout(begin, 0);
+    } else begin();
+  };
   const fileInput = useRef<HTMLInputElement>(null);
 
   // Latest unsaved text, read by the debounced/unmount flush.
@@ -376,6 +409,7 @@ export function NoteEditor() {
               icon={<Baseline className="size-4" />}
             />
             <FontPicker value={note.font} onChange={(f) => void saveMeta({ font: f })} />
+            <MicButton state={dictation.state} onClick={toggleDictation} showLabel size="sm" />
             <Button variant="ghost" size="sm" className="gap-2" onClick={() => fileInput.current?.click()}>
               <ImagePlus className="size-4" />
               <span className="hidden sm:inline">Image</span>

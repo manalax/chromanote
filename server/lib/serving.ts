@@ -81,3 +81,23 @@ export async function* streamChat(messages: ChatMessage[], signal?: AbortSignal)
     }
   }
 }
+
+/**
+ * One non-streaming chat completion; returns the answer text (reasoning
+ * skipped). gpt-oss reasons before answering and the reasoning counts towards
+ * `maxTokens`, so budgets must leave room for it; `reasoningEffort: 'low'`
+ * keeps simple rewriting tasks fast.
+ */
+export async function completeChat(
+  messages: ChatMessage[],
+  {
+    maxTokens = 2000,
+    reasoningEffort,
+    signal,
+  }: { maxTokens?: number; reasoningEffort?: 'low' | 'medium' | 'high'; signal?: AbortSignal } = {}
+): Promise<string> {
+  const body = { messages, max_tokens: maxTokens, ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}) };
+  const res = await invoke(CHAT_ENDPOINT(), body, signal);
+  const json = (await res.json()) as { choices?: { message?: { content?: DeltaContent } }[] };
+  return deltaText(json.choices?.[0]?.message?.content).trim();
+}

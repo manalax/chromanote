@@ -11,6 +11,7 @@ const DEFAULT_SETTINGS: Settings = {
   default_font: 'inter',
   default_note_color: null,
   default_text_color: null,
+  dictation_lang: null,
 };
 
 interface SettingsContextValue {

@@ -15,7 +15,10 @@ import {
 } from '@databricks/appkit-ui/react';
 import { api, askAssistant, type Chat, type ChatMessage, type Source } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { joinDictation } from '@/lib/dictation/commands';
+import { useDictation } from '@/lib/dictation/useDictation';
 import { MarkdownPreview } from './MarkdownPreview';
+import { MicButton } from './MicButton';
 
 const SUGGESTIONS = ['What did I write about recently?', "What's due this week?", 'Summarize my notes on a topic'];
 
@@ -50,6 +53,32 @@ export function AssistantPanel({ onClose }: { onClose: () => void }) {
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [input, setInput] = useState('');
+
+  // Dictation fills the question box (after anything already typed); the
+  // question is tidied when you stop, and you press Send yourself.
+  const voice = useRef({ base: '', said: '' });
+  const showVoice = (interim: string) => {
+    const { base, said } = voice.current;
+    setInput(base + said + (interim.trim() ? joinDictation(base + said, interim) : ''));
+  };
+  const dictation = useDictation({
+    onInterim: showVoice,
+    onFinal: (text) => {
+      voice.current.said += joinDictation(voice.current.base + voice.current.said, text);
+      showVoice('');
+    },
+    onStop: async () => {
+      const { base, said } = voice.current;
+      if (!said.trim()) return;
+      const [, lead, core] = /^(\s*)([\s\S]*?)\s*$/.exec(said)!;
+      const { text } = await api.tidyDictation(core, dictation.lang);
+      setInput(base + lead + text);
+    },
+  });
+  const toggleDictation = () => {
+    if (dictation.state === 'idle') voice.current = { base: input, said: '' };
+    dictation.toggle();
+  };
   const abort = useRef<AbortController | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
 
@@ -266,9 +295,10 @@ export function AssistantPanel({ onClose }: { onClose: () => void }) {
             }}
             placeholder="Ask about your notes…"
             rows={2}
-            className="max-h-40 min-h-[60px] resize-none pr-12"
+            className="max-h-40 min-h-[60px] resize-none pr-20"
             aria-label="Ask the assistant"
           />
+          <MicButton state={dictation.state} onClick={toggleDictation} className="absolute bottom-2 right-11" />
           {streaming ? (
             <Button
               type="button"

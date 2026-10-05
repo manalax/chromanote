@@ -101,3 +101,9 @@ body {
   background: var(--accent) !important;
   color: var(--accent-foreground) !important;
 }
+
+/* Dictation: the phrase still being recognised */
+.cm-editor .cm-dictation-interim {
+  opacity: 0.5;
+  font-style: italic;
+}

@@ -14,11 +14,20 @@ import { EditorView, keymap } from '@codemirror/view';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { useData } from '@/lib/data';
+import { type DictatedSpan, dictationExtension, editorDictation } from '@/lib/dictation/cmDictation';
 
 export interface MarkdownEditorHandle {
   insert: (text: string) => void;
   uploadImages: (files: File[]) => Promise<void>;
   focus: () => void;
+  /** Live dictation into the editor at the cursor. */
+  dictation: {
+    start: () => void;
+    interim: (text: string) => void;
+    final: (text: string) => void;
+    end: () => DictatedSpan | null;
+    replace: (span: DictatedSpan, text: string) => boolean;
+  };
 }
 
 interface MarkdownEditorProps {
@@ -85,7 +94,24 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
     uploadRef.current = uploadImages;
   });
 
-  useImperativeHandle(ref, () => ({ insert, uploadImages, focus: () => cm.current?.view?.focus() }));
+  useImperativeHandle(ref, () => {
+    const withView = <T,>(fn: (view: EditorView) => T, fallback: T) => {
+      const view = cm.current?.view;
+      return view ? fn(view) : fallback;
+    };
+    return {
+      insert,
+      uploadImages,
+      focus: () => cm.current?.view?.focus(),
+      dictation: {
+        start: () => withView((v) => editorDictation.start(v), undefined),
+        interim: (text) => withView((v) => editorDictation.interim(v, text), undefined),
+        final: (text) => withView((v) => editorDictation.final(v, text), undefined),
+        end: () => withView((v) => editorDictation.end(v), null),
+        replace: (span, text) => withView((v) => editorDictation.replace(v, span, text), false),
+      },
+    };
+  });
 
   const extensions = useMemo(() => {
     const wikilinkSource = (ctx: CompletionContext): CompletionResult | null => {
@@ -106,6 +132,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
     return [
       markdown({ base: markdownLanguage }),
       syntaxHighlighting(markdownHighlight),
+      dictationExtension,
       EditorView.lineWrapping,
       autocompletion({ override: [wikilinkSource], icons: false, defaultKeymap: false }),
       // Above markdown's Enter handling so Enter accepts a suggestion.

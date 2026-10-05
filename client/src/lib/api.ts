@@ -46,6 +46,8 @@ export interface Settings {
   default_font: FontKey;
   default_note_color: string | null;
   default_text_color: string | null;
+  /** BCP-47 tag; null = browser default. */
+  dictation_lang: string | null;
 }
 
 export interface Chat {
@@ -168,6 +170,11 @@ export const api = {
   updateTag: (id: string, patch: Partial<Pick<Tag, 'name' | 'color'>>) =>
     request<Tag>('PATCH', `/api/tags/${id}`, patch),
   deleteTag: (id: string) => request<void>('DELETE', `/api/tags/${id}`),
+
+  tidyDictation: (text: string, lang?: string) =>
+    request<{ text: string; changed: boolean }>('POST', '/api/dictation/tidy', { text, lang }),
+  createVoiceNote: (transcript: string, lang?: string) =>
+    request<Note>('POST', '/api/notes/voice', { transcript, lang }),
 
   getSettings: () => request<Settings>('GET', '/api/settings'),
   saveSettings: (patch: Partial<Omit<Settings, 'user'>>) => request<Settings>('PUT', '/api/settings', patch),

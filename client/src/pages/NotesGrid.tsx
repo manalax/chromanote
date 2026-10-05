@@ -22,6 +22,7 @@ import { api, type NoteFilters, type NoteSummary, type Priority } from '@/lib/ap
 import { accentOf } from '@/lib/colors';
 import { useData } from '@/lib/data';
 import { NotesBoard } from '@/components/NotesBoard';
+import { VoiceNoteButton } from '@/components/VoiceNoteButton';
 import { SortableNotes } from '@/components/SortableNotes';
 import { PRIORITIES } from '@/lib/meta';
 
@@ -213,6 +214,7 @@ export function NotesGrid() {
               <X className="size-4" /> Clear
             </Button>
           )}
+          <VoiceNoteButton />
           <Button onClick={() => void createNote()} disabled={creating} className="rounded-full">
             <Plus className="size-4" /> New note
           </Button>
