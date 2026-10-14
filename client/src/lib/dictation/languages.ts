@@ -1,5 +1,3 @@
-import { createBrowserEngine } from './browserEngine';
-
 /** Common languages supported by browser speech recognition (BCP-47 tags). */
 export const DICTATION_LANGUAGES: { tag: string; label: string }[] = [
   { tag: 'en-US', label: 'English (US)' },
@@ -25,7 +23,3 @@ export const DICTATION_LANGUAGES: { tag: string; label: string }[] = [
   { tag: 'zh-TW', label: '中文 (繁體)' },
   { tag: 'fil-PH', label: 'Filipino' },
 ];
-
-export function dictationSupported(): boolean {
-  return createBrowserEngine().supported;
-}

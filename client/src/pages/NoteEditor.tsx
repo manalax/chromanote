@@ -93,14 +93,21 @@ export function NoteEditor() {
     onFinal: (text) => editorRef.current?.dictation.final(text),
     onStop: async () => {
       const span = editorRef.current?.dictation.end();
-      if (!span?.text.trim()) return;
+      if (!span) return;
+      if (!span.text.trim()) return editorRef.current?.dictation.release(span);
       // Tidy only the words; keep the surrounding whitespace as inserted.
       const [, lead, core, trail] = /^(\s*)([\s\S]*?)(\s*)$/.exec(span.text)!;
-      const { text, changed } = await api.tidyDictation(core, dictation.lang);
-      if (changed && !editorRef.current?.dictation.replace(span, lead + text + trail)) {
-        toast('Kept your dictated text as-is because it was edited while tidying');
+      try {
+        const { text, changed } = await api.tidyDictation(core, dictation.lang);
+        if (changed && !editorRef.current?.dictation.replace(span, lead + text + trail)) {
+          toast('Kept your dictated text as-is because it was edited while tidying');
+        }
+      } finally {
+        editorRef.current?.dictation.release(span);
       }
     },
+    // Tidy in the background so the mic is free to dictate again straight away.
+    background: true,
   });
   const toggleDictation = () => {
     if (dictation.state !== 'idle') {
@@ -409,7 +416,14 @@ export function NoteEditor() {
               icon={<Baseline className="size-4" />}
             />
             <FontPicker value={note.font} onChange={(f) => void saveMeta({ font: f })} />
-            <MicButton state={dictation.state} onClick={toggleDictation} showLabel size="sm" />
+            <MicButton
+              state={dictation.state}
+              pending={dictation.pending}
+              unsupportedMessage={dictation.unsupportedMessage}
+              onClick={toggleDictation}
+              showLabel
+              size="sm"
+            />
             <Button variant="ghost" size="sm" className="gap-2" onClick={() => fileInput.current?.click()}>
               <ImagePlus className="size-4" />
               <span className="hidden sm:inline">Image</span>

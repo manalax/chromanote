@@ -1,8 +1,9 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useTheme } from 'next-themes';
 import { toast } from 'sonner';
-import { api, type Settings } from './api';
-import { backgroundSurface } from './colors';
+import { api, type Settings } from '@/lib/api';
+import { backgroundSurface } from '@/lib/colors';
+import { SettingsContext } from '@/lib/settings';
 
 const DEFAULT_SETTINGS: Settings = {
   user: '',
@@ -13,14 +14,6 @@ const DEFAULT_SETTINGS: Settings = {
   default_text_color: null,
   dictation_lang: null,
 };
-
-interface SettingsContextValue {
-  settings: Settings;
-  isDark: boolean;
-  update: (patch: Partial<Omit<Settings, 'user'>>) => Promise<void>;
-}
-
-const SettingsContext = createContext<SettingsContextValue | null>(null);
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
@@ -63,10 +56,4 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo(() => ({ settings, isDark, update }), [settings, isDark, update]);
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;
-}
-
-export function useSettings(): SettingsContextValue {
-  const ctx = useContext(SettingsContext);
-  if (!ctx) throw new Error('useSettings must be used inside SettingsProvider');
-  return ctx;
 }

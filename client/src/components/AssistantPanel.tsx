@@ -298,7 +298,12 @@ export function AssistantPanel({ onClose }: { onClose: () => void }) {
             className="max-h-40 min-h-[60px] resize-none pr-20"
             aria-label="Ask the assistant"
           />
-          <MicButton state={dictation.state} onClick={toggleDictation} className="absolute bottom-2 right-11" />
+          <MicButton
+            state={dictation.state}
+            unsupportedMessage={dictation.unsupportedMessage}
+            onClick={toggleDictation}
+            className="absolute bottom-2 right-11"
+          />
           {streaming ? (
             <Button
               type="button"

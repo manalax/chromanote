@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Check, Monitor, Moon, Pencil, Sun, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -27,7 +27,13 @@ import { FONTS } from '@/lib/fonts';
 import { useSettings } from '@/lib/settings';
 import { cn } from '@/lib/utils';
 import { ColorPicker } from '@/components/ColorPicker';
-import { DICTATION_LANGUAGES, dictationSupported } from '@/lib/dictation/languages';
+import {
+  SPEECH_SUPPORT_EVENT,
+  UNSUPPORTED_MESSAGES,
+  clearSpeechUnavailable,
+  currentSpeechSupport,
+} from '@/lib/dictation/browserSupport';
+import { DICTATION_LANGUAGES } from '@/lib/dictation/languages';
 import { useDictationLang } from '@/lib/dictation/useDictation';
 
 function Section({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
@@ -310,6 +316,12 @@ function DictationLanguage() {
   const effective = useDictationLang();
   const value = settings.dictation_lang ?? BROWSER_DEFAULT;
   const browserLabel = DICTATION_LANGUAGES.find((l) => l.tag === effective)?.label ?? effective;
+  const [support, setSupport] = useState(currentSpeechSupport);
+  useEffect(() => {
+    const recheck = () => setSupport(currentSpeechSupport());
+    window.addEventListener(SPEECH_SUPPORT_EVENT, recheck);
+    return () => window.removeEventListener(SPEECH_SUPPORT_EVENT, recheck);
+  }, []);
   return (
     <div className="space-y-2">
       <Select value={value} onValueChange={(v) => void update({ dictation_lang: v === BROWSER_DEFAULT ? null : v })}>
@@ -330,9 +342,21 @@ function DictationLanguage() {
           Spoken commands like “period” and “new line” only work in English; punctuation is still added when you stop.
         </p>
       )}
-      {!dictationSupported() && (
+      {!support.supported && (
         <p className="text-sm text-muted-foreground">
-          Dictation needs Chrome, Edge or Safari. This browser doesn&apos;t support speech recognition.
+          {UNSUPPORTED_MESSAGES[support.reason]}{' '}
+          {support.reason === 'no-service' && (
+            <button
+              type="button"
+              className="font-medium text-foreground underline underline-offset-2"
+              onClick={() => {
+                clearSpeechUnavailable();
+                toast('Dictation re-enabled. Try the mic again.');
+              }}
+            >
+              Try dictation again
+            </button>
+          )}
         </p>
       )}
     </div>

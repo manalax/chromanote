@@ -44,3 +44,16 @@ export function titleFromTranscript(transcript: string, maxLength = 60): string 
   const cut = sentence.slice(0, maxLength);
   return `${cut.slice(0, Math.max(cut.lastIndexOf(' '), 20)).trimEnd()}…`;
 }
+
+/** A voice note's title: the whole dictation on one line, shortened only if over `maxLength`. */
+export function titleFromDictation(transcript: string, maxLength = 300): string {
+  const line = transcript
+    .split(/\n/)
+    .map((l) => l.replace(/^[-\s]+/, ''))
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (line.length <= maxLength) return line;
+  const cut = line.slice(0, maxLength - 1);
+  return `${cut.slice(0, Math.max(cut.lastIndexOf(' '), 20)).trimEnd()}…`;
+}

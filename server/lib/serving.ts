@@ -62,8 +62,12 @@ export async function* streamChat(messages: ChatMessage[], signal?: AbortSignal)
   if (!res.body) return;
   const decoder = new TextDecoder();
   let buffer = '';
-  for await (const bytes of res.body as unknown as AsyncIterable<Uint8Array>) {
-    buffer += decoder.decode(bytes, { stream: true });
+  const reader = res.body.getReader();
+  for (;;) {
+    // Node types the fetch body as a stream of `any`; it carries bytes.
+    const { value, done } = (await reader.read()) as { done: boolean; value?: Uint8Array };
+    if (done) return;
+    buffer += decoder.decode(value, { stream: true });
     let newline: number;
     while ((newline = buffer.indexOf('\n')) >= 0) {
       const line = buffer.slice(0, newline).trim();

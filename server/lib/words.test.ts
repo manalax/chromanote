@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeWords, sameWords, titleFromTranscript } from './words';
+import { normalizeWords, sameWords, titleFromDictation, titleFromTranscript } from './words';
 
 describe('normalizeWords', () => {
   it('lowercases and strips punctuation but keeps apostrophes inside words', () => {
@@ -44,5 +44,23 @@ describe('titleFromTranscript', () => {
     );
     expect(t.length).toBeLessThanOrEqual(61);
     expect(t.endsWith('…')).toBe(true);
+  });
+});
+
+describe('titleFromDictation', () => {
+  it('uses the whole dictation unchanged', () => {
+    expect(titleFromDictation('Call the plumber tomorrow. Also buy milk.')).toBe(
+      'Call the plumber tomorrow. Also buy milk.'
+    );
+  });
+
+  it('flattens lines and list markers onto one line', () => {
+    expect(titleFromDictation('Shopping\n- milk\n- eggs')).toBe('Shopping milk eggs');
+  });
+
+  it('shortens dictation over the limit at a word boundary', () => {
+    const t = titleFromDictation('word '.repeat(100));
+    expect(t.length).toBeLessThanOrEqual(300);
+    expect(t.endsWith('word…')).toBe(true);
   });
 });

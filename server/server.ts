@@ -24,7 +24,17 @@ createApp({
     }),
   ],
   async onPluginsReady(appkit) {
-    const app = appkit as unknown as AppKitInstance;
+    const app: AppKitInstance = {
+      lakebase: {
+        // pg returns untyped rows; each caller states the row shape its SQL selects.
+        query: async <T>(text: string, params?: unknown[]) => {
+          const { rows } = await appkit.lakebase.query(text, params);
+          return { rows: rows as T[] };
+        },
+      },
+      server: appkit.server,
+      files: (volume) => appkit.files(volume),
+    };
     await setupSchema(app);
     registerNoteRoutes(app);
     registerGraphRoutes(app);

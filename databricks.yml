@@ -21,8 +21,8 @@ variables:
 resources:
   apps:
     app:
-      name: "chromanote"
-      description: "Chromanote: a colourful knowledge base with a RAG assistant"
+      name: 'chromanote'
+      description: 'Chromanote: a colourful knowledge base with a RAG assistant'
       source_code_path: ./
 
       # Start the app automatically on deploy.

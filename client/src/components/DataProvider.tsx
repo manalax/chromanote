@@ -1,20 +1,7 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { normalizeTitle } from '../../../shared/wikilinks';
-import { api, type NoteRef, type Tag } from './api';
-
-/**
- * App-wide caches shared by several screens: the user's tags, and the
- * title -> note index used to render and autocomplete [[wikilinks]].
- */
-interface DataContextValue {
-  tags: Tag[];
-  refreshTags: () => Promise<void>;
-  titles: NoteRef[];
-  titleIndex: Map<string, string>;
-  refreshTitles: () => Promise<void>;
-}
-
-const DataContext = createContext<DataContextValue | null>(null);
+import { api, type NoteRef, type Tag } from '@/lib/api';
+import { DataContext } from '@/lib/data';
 
 export function DataProvider({ children }: { children: ReactNode }) {
   const [tags, setTags] = useState<Tag[]>([]);
@@ -47,10 +34,4 @@ export function DataProvider({ children }: { children: ReactNode }) {
     [tags, refreshTags, titles, titleIndex, refreshTitles]
   );
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
-}
-
-export function useData(): DataContextValue {
-  const ctx = useContext(DataContext);
-  if (!ctx) throw new Error('useData must be used inside DataProvider');
-  return ctx;
 }

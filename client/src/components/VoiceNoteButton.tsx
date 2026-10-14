@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { Mic } from 'lucide-react';
+import { CircleAlert, Mic } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button, Popover, PopoverAnchor, PopoverContent, Spinner } from '@databricks/appkit-ui/react';
 import { api } from '@/lib/api';
@@ -11,7 +11,7 @@ import { MicButton } from './MicButton';
 
 /**
  * Quick voice note: dictate, then the transcript becomes a new note (spoken
- * commands applied, no tidy-up) with an AI-suggested title.
+ * commands applied, no tidy-up) whose title is exactly what was said.
  */
 export function VoiceNoteButton() {
   const navigate = useNavigate();
@@ -19,6 +19,8 @@ export function VoiceNoteButton() {
   const [open, setOpen] = useState(false);
   const [said, setSaid] = useState('');
   const [interim, setInterim] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
   const transcript = useRef('');
   const cancelled = useRef(false);
 
@@ -29,28 +31,43 @@ export function VoiceNoteButton() {
       setSaid(transcript.current);
     },
     onStop: async () => {
-      const text = transcript.current.trim();
       if (cancelled.current) return close();
-      if (!text) {
+      if (!transcript.current.trim()) {
         toast('Nothing was heard, so no note was created');
         return close();
       }
-      try {
-        const note = await api.createVoiceNote(text, dictation.lang);
-        void refreshTitles();
-        close();
-        toast.success(`Created “${note.title}”`);
-        void navigate(`/notes/${note.id}`);
-      } catch (err) {
-        toast.error((err as Error).message);
-      }
+      await save();
     },
   });
+
+  /** Saves the transcript as a note; on failure, keeps it so the user can retry. */
+  async function save() {
+    setError(null);
+    try {
+      const note = await api.createVoiceNote(transcript.current.trim(), dictation.lang);
+      void refreshTitles();
+      close();
+      toast.success(`Created “${note.title}”`);
+      void navigate(`/notes/${note.id}`);
+    } catch (err) {
+      setError((err as Error).message || 'Something went wrong');
+    }
+  }
+
+  const retry = async () => {
+    setRetrying(true);
+    try {
+      await save();
+    } finally {
+      setRetrying(false);
+    }
+  };
 
   function close() {
     setOpen(false);
     setSaid('');
     setInterim('');
+    setError(null);
     transcript.current = '';
   }
 
@@ -59,15 +76,24 @@ export function VoiceNoteButton() {
     transcript.current = '';
     setSaid('');
     setInterim('');
+    setError(null);
     setOpen(true);
     dictation.toggle();
   };
 
   const listening = dictation.state === 'listening';
-  const saving = dictation.state === 'tidying';
+  const saving = dictation.state === 'tidying' || retrying;
 
   if (dictation.state === 'unsupported') {
-    return <MicButton state="unsupported" onClick={() => undefined} variant="outline" className="rounded-full" />;
+    return (
+      <MicButton
+        state="unsupported"
+        unsupportedMessage={dictation.unsupportedMessage}
+        onClick={() => undefined}
+        variant="outline"
+        className="rounded-full"
+      />
+    );
   }
 
   return (
@@ -99,11 +125,18 @@ export function VoiceNoteButton() {
               <span className="absolute inline-flex size-full animate-ping rounded-full bg-red-500 opacity-75" />
               <span className="relative inline-flex size-2.5 rounded-full bg-red-500" />
             </span>
-          ) : (
+          ) : saving ? (
             <Spinner className="size-3.5" />
-          )}
-          {listening ? 'Listening…' : 'Creating note…'}
+          ) : error ? (
+            <CircleAlert className="size-4 text-destructive" aria-hidden />
+          ) : null}
+          {listening ? 'Listening…' : saving ? 'Creating note…' : error ? 'Couldn’t create the note' : null}
         </div>
+        {error && !saving && (
+          <p className="text-sm text-destructive" role="alert">
+            {error}
+          </p>
+        )}
         <div
           className="max-h-48 min-h-16 overflow-y-auto whitespace-pre-wrap rounded-md bg-muted/50 p-2 text-sm"
           aria-live="polite"
@@ -117,22 +150,33 @@ export function VoiceNoteButton() {
             <span className="text-muted-foreground">Start speaking. Say “new line” or “bullet” for layout.</span>
           )}
         </div>
-        <div className="flex justify-end gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={!listening}
-            onClick={() => {
-              cancelled.current = true;
-              dictation.stop();
-            }}
-          >
-            Cancel
-          </Button>
-          <Button size="sm" disabled={!listening} onClick={() => dictation.stop()}>
-            Stop &amp; save
-          </Button>
-        </div>
+        {error && !saving ? (
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={close}>
+              Discard
+            </Button>
+            <Button size="sm" onClick={() => void retry()}>
+              Retry
+            </Button>
+          </div>
+        ) : (
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={!listening}
+              onClick={() => {
+                cancelled.current = true;
+                dictation.stop();
+              }}
+            >
+              Cancel
+            </Button>
+            <Button size="sm" disabled={!listening} onClick={() => dictation.stop()}>
+              Stop &amp; save
+            </Button>
+          </div>
+        )}
       </PopoverContent>
     </Popover>
   );

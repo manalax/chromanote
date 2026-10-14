@@ -13,21 +13,43 @@ interface DictationState {
   session: Range | null;
   /** The in-progress phrase, shown faded until it is final. */
   interim: Range | null;
+  /** Ended sessions awaiting their tidy-up; kept in step with later edits. */
+  pending: PendingSpan[];
+}
+
+interface PendingSpan extends Range {
+  id: number;
 }
 
 const setSession = StateEffect.define<Range | null>();
 const setInterim = StateEffect.define<Range | null>();
+const addPending = StateEffect.define<PendingSpan>();
+const removePending = StateEffect.define<number>();
 
 const mapRange = (r: Range | null, tr: Transaction): Range | null =>
   r && { from: tr.changes.mapPos(r.from, -1), to: tr.changes.mapPos(r.to, 1) };
 
+/** Maps a finished span so text typed right at either edge stays outside it. */
+const mapPendingSpan = (p: PendingSpan, tr: Transaction): PendingSpan => {
+  const from = tr.changes.mapPos(p.from, 1);
+  return { ...p, from, to: Math.max(from, tr.changes.mapPos(p.to, -1)) };
+};
+
+let nextPendingId = 0;
+
 const dictationField = StateField.define<DictationState>({
-  create: () => ({ session: null, interim: null }),
+  create: () => ({ session: null, interim: null, pending: [] }),
   update(value, tr) {
-    let next: DictationState = { session: mapRange(value.session, tr), interim: mapRange(value.interim, tr) };
+    let next: DictationState = {
+      session: mapRange(value.session, tr),
+      interim: mapRange(value.interim, tr),
+      pending: tr.docChanged ? value.pending.map((p) => mapPendingSpan(p, tr)) : value.pending,
+    };
     for (const e of tr.effects) {
       if (e.is(setSession)) next = { ...next, session: e.value };
       if (e.is(setInterim)) next = { ...next, interim: e.value };
+      if (e.is(addPending)) next = { ...next, pending: [...next.pending, e.value] };
+      if (e.is(removePending)) next = { ...next, pending: next.pending.filter((p) => p.id !== e.value) };
     }
     return next;
   },
@@ -44,6 +66,8 @@ const dictationField = StateField.define<DictationState>({
 export const dictationExtension: Extension = dictationField;
 
 export interface DictatedSpan extends Range {
+  /** Identifies the span for `replace`, which follows it through later edits. */
+  id: number;
   text: string;
 }
 
@@ -107,9 +131,13 @@ export const editorDictation = {
       });
     }
     const current = view.state.field(dictationField).session ?? session;
-    view.dispatch({ effects: [setSession.of(null), setInterim.of(null)] });
-    if (!current || current.to <= current.from) return null;
-    return { ...current, text: view.state.doc.sliceString(current.from, current.to) };
+    if (!current || current.to <= current.from) {
+      view.dispatch({ effects: [setSession.of(null), setInterim.of(null)] });
+      return null;
+    }
+    const span = { from: current.from, to: current.to, id: nextPendingId++ };
+    view.dispatch({ effects: [setSession.of(null), setInterim.of(null), addPending.of(span)] });
+    return { ...span, text: view.state.doc.sliceString(span.from, span.to) };
   },
 
   /**
@@ -117,13 +145,25 @@ export const editorDictation = {
    * words). Skipped if the user has edited that text in the meantime.
    */
   replace(view: EditorView, span: DictatedSpan, text: string): boolean {
-    if (span.to > view.state.doc.length || view.state.doc.sliceString(span.from, span.to) !== span.text) return false;
+    // Where the span is now, after any edits made while the tidy-up ran.
+    const at = view.state.field(dictationField).pending.find((p) => p.id === span.id);
+    const drop = removePending.of(span.id);
+    if (!at || view.state.doc.sliceString(at.from, at.to) !== span.text) {
+      view.dispatch({ effects: drop });
+      return false;
+    }
     view.dispatch({
-      changes: { from: span.from, to: span.to, insert: text },
+      changes: { from: at.from, to: at.to, insert: text },
+      effects: drop,
       userEvent: 'input.dictate.tidy',
       // Its own undo step, even if it lands right after the last phrase.
       annotations: isolateHistory.of('full'),
     });
     return true;
+  },
+
+  /** Stops tracking a span that won't be replaced. */
+  release(view: EditorView, span: DictatedSpan) {
+    view.dispatch({ effects: removePending.of(span.id) });
   },
 };

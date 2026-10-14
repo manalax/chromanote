@@ -234,7 +234,6 @@ databricks apps init \
 
 A **`README.md`** ships inside the scaffolded project. Follow it end to end to configure, run, and deploy the app.
 
-
 ## Source Code
 
 GitHub: https://github.com/databricks/app-templates/tree/main/rag-chat

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { type AppKitInstance, HttpError, getUserId, route } from '../lib/appkit';
 import { completeChat } from '../lib/serving';
-import { sameWords, titleFromTranscript } from '../lib/words';
+import { sameWords, titleFromDictation } from '../lib/words';
 import { createNote, getNote } from './notes';
 
 const MAX_CHARS = 20_000;
@@ -16,8 +16,8 @@ Only add punctuation, capitalisation and paragraph breaks. Do not add, remove, r
 Keep any markdown such as "- " list markers.
 Reply with only the corrected text, without the tags.`;
 
-const TITLE_PROMPT = `Write a short, specific title (at most 8 words) for a note with this content, in the same language.
-Reply with only the title: no quotes, no trailing punctuation.`;
+/** Matches the note title limit in `CreateNoteBody`. */
+const MAX_TITLE = 300;
 
 export function registerDictationRoutes(appkit: AppKitInstance) {
   appkit.server.extend((app) => {
@@ -39,7 +39,11 @@ export function registerDictationRoutes(appkit: AppKitInstance) {
               { role: 'system', content: `${TIDY_PROMPT}${lang ? `\nLanguage: ${lang}.` : ''}` },
               { role: 'user', content: `<dictation>\n${text}\n</dictation>` },
             ],
-            { maxTokens: Math.min(8000, Math.ceil(text.length / 2) + 1000), reasoningEffort: 'low' }
+            {
+              maxTokens: Math.min(8000, Math.ceil(text.length / 2) + 1000),
+              reasoningEffort: 'low',
+              signal: AbortSignal.timeout(30_000),
+            }
           );
         } catch (err) {
           console.warn('[dictation] Tidy-up failed:', (err as Error).message);
@@ -66,28 +70,13 @@ export function registerDictationRoutes(appkit: AppKitInstance) {
           .object({ transcript: z.string().trim().min(1).max(MAX_CHARS), lang: Lang })
           .safeParse(req.body);
         if (!parsed.success) throw new HttpError(400, 'transcript is required');
-        const { transcript, lang } = parsed.data;
+        const { transcript } = parsed.data;
 
-        let title = '';
-        try {
-          title = (
-            await completeChat(
-              [
-                { role: 'system', content: `${TITLE_PROMPT}${lang ? `\nLanguage: ${lang}.` : ''}` },
-                { role: 'user', content: transcript.slice(0, 4000) },
-              ],
-              { maxTokens: 600, reasoningEffort: 'low' }
-            )
-          )
-            .split('\n')[0]
-            .replace(/^["'“”‘’#\s]+|["'“”‘’.\s]+$/g, '')
-            .slice(0, 80);
-        } catch (err) {
-          console.warn('[dictation] Title generation failed:', (err as Error).message);
-        }
-        if (!title) title = titleFromTranscript(transcript) || `Voice note · ${new Date().toISOString().slice(0, 16)}`;
+        // What was said is the title. If it's too long to fit, keep every word in the body.
+        const title = titleFromDictation(transcript, MAX_TITLE);
+        const body = title === titleFromDictation(transcript, Infinity) ? '' : transcript;
 
-        const id = await createNote(appkit, userId, { title, body: transcript });
+        const id = await createNote(appkit, userId, { title, body });
         res.status(201).json(await getNote(appkit, userId, id));
       })
     );

@@ -27,6 +27,8 @@ export interface MarkdownEditorHandle {
     final: (text: string) => void;
     end: () => DictatedSpan | null;
     replace: (span: DictatedSpan, text: string) => boolean;
+    /** Stops tracking a span that won't be replaced (e.g. the tidy-up failed). */
+    release: (span: DictatedSpan) => void;
   };
 }
 
@@ -109,6 +111,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
         final: (text) => withView((v) => editorDictation.final(v, text), undefined),
         end: () => withView((v) => editorDictation.end(v), null),
         replace: (span, text) => withView((v) => editorDictation.replace(v, span, text), false),
+        release: (span) => withView((v) => editorDictation.release(v, span), undefined),
       },
     };
   });

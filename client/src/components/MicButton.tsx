@@ -13,6 +13,10 @@ const LABELS: Record<DictationState, string> = {
 interface MicButtonProps {
   state: DictationState;
   onClick: () => void;
+  /** A background tidy-up is running: show a spinner but keep the button usable. */
+  pending?: boolean;
+  /** Why dictation is unavailable (shown when state is 'unsupported'). */
+  unsupportedMessage?: string | null;
   /** Show the label next to the icon (toolbar style). */
   showLabel?: boolean;
   size?: 'sm' | 'icon-sm';
@@ -23,12 +27,20 @@ interface MicButtonProps {
 export function MicButton({
   state,
   onClick,
+  pending,
+  unsupportedMessage,
   showLabel,
   size = 'icon-sm',
   variant = 'ghost',
   className,
 }: MicButtonProps) {
   const listening = state === 'listening';
+  const label =
+    state === 'unsupported' && unsupportedMessage
+      ? unsupportedMessage
+      : pending && state === 'idle'
+        ? 'Dictate (tidying up the last dictation…)'
+        : LABELS[state];
   const button = (
     <Button
       type="button"
@@ -36,11 +48,11 @@ export function MicButton({
       size={size}
       onClick={onClick}
       disabled={state === 'unsupported' || state === 'tidying'}
-      aria-label={LABELS[state]}
+      aria-label={label}
       aria-pressed={listening}
       className={cn('relative gap-2', listening && 'text-red-600 dark:text-red-400', className)}
     >
-      {state === 'tidying' ? (
+      {state === 'tidying' || (pending && state === 'idle') ? (
         <Spinner className="size-4" />
       ) : listening ? (
         <Square className="size-3.5 fill-current" />
@@ -63,7 +75,7 @@ export function MicButton({
         {/* A disabled button gets no pointer events, so the tooltip needs a wrapper. */}
         {state === 'unsupported' ? <span tabIndex={0}>{button}</span> : button}
       </TooltipTrigger>
-      <TooltipContent>{LABELS[state]}</TooltipContent>
+      <TooltipContent className="max-w-64">{label}</TooltipContent>
     </Tooltip>
   );
 }
