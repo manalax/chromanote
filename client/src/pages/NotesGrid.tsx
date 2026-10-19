@@ -43,8 +43,10 @@ export function NotesGrid() {
   const [params, setParams] = useSearchParams();
   const [q, setQ] = useState(params.get('q') ?? '');
   const debouncedQ = useDebounced(q, 250);
-  const [notes, setNotes] = useState<NoteSummary[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // Results and errors remember which filters they are for, so a change of
+  // filters never shows another query's notes while the new ones load.
+  const [loaded, setLoaded] = useState<{ key: string; rows: NoteSummary[] } | null>(null);
+  const [failed, setFailed] = useState<{ key: string; message: string } | null>(null);
   const [creating, setCreating] = useState(false);
   const [reload, setReload] = useState(0);
 
@@ -57,6 +59,8 @@ export function NotesGrid() {
   };
   const filterKey = JSON.stringify(filters);
   const hasFilters = !!(filters.q || filters.tag || filters.priority !== undefined || filters.due);
+  const notes = loaded?.key === filterKey ? loaded.rows : null;
+  const error = failed?.key === filterKey ? failed.message : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -64,10 +68,10 @@ export function NotesGrid() {
       .listNotes(JSON.parse(filterKey) as NoteFilters)
       .then((rows) => {
         if (cancelled) return;
-        setNotes(rows);
-        setError(null);
+        setLoaded({ key: filterKey, rows });
+        setFailed(null);
       })
-      .catch((err: Error) => !cancelled && setError(err.message));
+      .catch((err: Error) => !cancelled && setFailed({ key: filterKey, message: err.message }));
     return () => {
       cancelled = true;
     };
