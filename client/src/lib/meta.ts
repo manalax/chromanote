@@ -1,4 +1,5 @@
 import type { Priority } from './api';
+import { stripColorSpans } from '../../../shared/colorSpans';
 
 export const PRIORITIES: { value: Priority; label: string; color: string }[] = [
   { value: 0, label: 'None', color: 'transparent' },
@@ -32,7 +33,7 @@ export function formatDue(dueAt: string): string {
 
 /** Turns markdown into a plain-text excerpt for cards. */
 export function plainExcerpt(md: string, max = 280): string {
-  const text = md
+  const text = stripColorSpans(md)
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
     .replace(/\[\[([^[\]|\n]+?)(?:\|([^[\]\n]+?))?\]\]/g, (_m, t: string, l?: string) => l ?? t)

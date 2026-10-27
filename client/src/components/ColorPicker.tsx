@@ -13,7 +13,8 @@ interface Swatch {
 }
 
 interface ColorPickerProps {
-  value: string | null;
+  /** The selected colour; null selects "none", undefined selects nothing. */
+  value: string | null | undefined;
   onChange: (value: string | null) => void;
   swatches?: Swatch[];
   noneLabel?: string;
@@ -24,6 +25,7 @@ interface ColorPickerProps {
   /** `text` previews each swatch as a coloured "A" on `surface` instead of a fill. */
   variant?: 'fill' | 'text';
   surface?: string;
+  onOpenChange?: (open: boolean) => void;
 }
 
 /** Palette swatches plus a custom hex colour. */
@@ -38,6 +40,7 @@ export function ColorPicker({
   icon = <Palette className="size-4" />,
   variant = 'fill',
   surface,
+  onOpenChange,
 }: ColorPickerProps) {
   const { isDark } = useSettings();
   // Only the six hex digits are typed; the "#" is a fixed prefix.
@@ -46,7 +49,7 @@ export function ColorPicker({
   const customActive = !!value && isHex(value);
 
   return (
-    <Popover>
+    <Popover onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>
         {trigger ?? (
           <Button variant="ghost" size="sm" className="gap-2" aria-label={label}>
@@ -64,7 +67,7 @@ export function ColorPicker({
               color={variant === 'text' ? 'currentColor' : 'var(--background)'}
               variant={variant}
               surface={surface}
-              selected={!value}
+              selected={value === null}
               onClick={() => onChange(null)}
               className="border-dashed"
             />
