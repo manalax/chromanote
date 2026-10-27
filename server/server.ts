@@ -1,5 +1,6 @@
 import { createApp, files, lakebase, server } from '@databricks/appkit';
 import type { AppKitInstance } from './lib/appkit';
+import { backfillIndex } from './lib/rag';
 import { setupSchema } from './lib/schema';
 import { registerAssistantRoutes } from './routes/assistant';
 import { registerDictationRoutes } from './routes/dictation';
@@ -36,6 +37,8 @@ createApp({
       files: (volume) => appkit.files(volume),
     };
     await setupSchema(app);
+    // Index notes whose reindex was lost (restart, failure); runs in the background.
+    void backfillIndex(app);
     registerNoteRoutes(app);
     registerGraphRoutes(app);
     registerTagRoutes(app);

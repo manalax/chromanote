@@ -8,6 +8,9 @@ export const BOARD_COLUMNS = 4;
 /** SQL twin of normalizeTitle() in shared/wikilinks.ts. */
 export const normTitle = (col: string) => `regexp_replace(lower(trim(${col})), '\\s+', ' ', 'g')`;
 
+/** Hash of the text a note's embeddings are built from (compared with notes.indexed_hash). */
+export const contentHash = (title: string, body: string) => `md5(${title} || E'\\n' || ${body})`;
+
 function addColumn(table: string, column: string, type: string) {
   return `DO $$ BEGIN
     IF NOT EXISTS (
@@ -134,6 +137,8 @@ const STATEMENTS = [
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`,
   `CREATE INDEX IF NOT EXISTS note_revisions_note_idx ON chromanote.note_revisions (note_id, id DESC)`,
+  // contentHash() of the text note_chunks was built from; NULL or a mismatch means the note needs reindexing.
+  addColumn('notes', 'indexed_hash', 'TEXT'),
 ];
 
 export async function setupSchema(appkit: AppKitInstance) {

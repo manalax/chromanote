@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { type AppKitInstance, HttpError, getUserId, route } from '../lib/appkit';
-import { type NoteDetails, embedQuery, loadNoteMeta, retrieveSimilar, retrieveTagged } from '../lib/rag';
+import { type NoteDetails, catchUpIndex, embedQuery, loadNoteMeta, retrieveSimilar, retrieveTagged } from '../lib/rag';
 import { mentionedTags } from '../lib/tagMatch';
 import { formatForModel, safeTimeZone } from '../lib/time';
 import { type ChatMessage, streamChat } from '../lib/serving';
@@ -188,9 +188,11 @@ export function registerAssistantRoutes(appkit: AppKitInstance) {
           [chat.id, question]
         );
 
-        // Embeddings cover note text only; tags, priority, archive state and
-        // links are read fresh here so the assistant always sees current values.
-        const vector = await embedQuery(question);
+        // Index notes saved moments ago (their debounced reindex may not have
+        // run yet) while the question is embedded. Embeddings cover note text
+        // only; tags, priority, archive state and links are read fresh here so
+        // the assistant always sees current values.
+        const [vector] = await Promise.all([embedQuery(question), catchUpIndex(appkit, userId)]);
         const [similar, recent, tags] = await Promise.all([
           retrieveSimilar(appkit, userId, vector),
           appkit.lakebase.query<NoteMeta>(

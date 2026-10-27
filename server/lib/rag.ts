@@ -1,16 +1,25 @@
 import type { AppKitInstance } from './appkit';
 import { chunkNote } from './chunk';
-import { normTitle } from './schema';
+import { contentHash, normTitle } from './schema';
 import { embed } from './serving';
 
 const REINDEX_DELAY_MS = 3000;
+const CATCH_UP_LIMIT = 20;
+const CATCH_UP_TIMEOUT_MS = 4000;
+const INDEX_CONCURRENCY = 4;
+const BACKFILL_PAGE = 50;
+
 const pending = new Map<string, NodeJS.Timeout>();
+const inflight = new Map<string, Promise<void>>();
 
 const toVector = (v: number[]) => `[${v.join(',')}]`;
 
+const STALE = `deleted_at IS NULL AND indexed_hash IS DISTINCT FROM ${contentHash('title', 'body')}`;
+
 export async function reindexNote(appkit: AppKitInstance, noteId: string): Promise<void> {
-  const { rows } = await appkit.lakebase.query<{ user_id: string; title: string; body: string }>(
-    'SELECT user_id, title, body FROM chromanote.notes WHERE id = $1 AND deleted_at IS NULL',
+  const { rows } = await appkit.lakebase.query<{ user_id: string; title: string; body: string; hash: string }>(
+    `SELECT user_id, title, body, ${contentHash('title', 'body')} AS hash
+     FROM chromanote.notes WHERE id = $1 AND deleted_at IS NULL`,
     [noteId]
   );
   const note = rows[0];
@@ -31,7 +40,32 @@ export async function reindexNote(appkit: AppKitInstance, noteId: string): Promi
       [noteId, note.user_id, chunks, vectors.map(toVector)]
     );
   }
+  // Only mark the note fresh if it wasn't edited while embedding.
+  await appkit.lakebase.query(
+    `UPDATE chromanote.notes SET indexed_hash = $2 WHERE id = $1 AND ${contentHash('title', 'body')} = $2`,
+    [noteId, note.hash]
+  );
 }
+
+/**
+ * Reindexes a note now, cancelling any debounced run. Runs for one note never
+ * overlap (the chunk swap isn't transactional), so a call made while one is in
+ * flight waits for it and then indexes again.
+ */
+export function indexNow(appkit: AppKitInstance, noteId: string): Promise<void> {
+  clearTimeout(pending.get(noteId));
+  pending.delete(noteId);
+  const run = (inflight.get(noteId) ?? Promise.resolve()).catch(() => {}).then(() => reindexNote(appkit, noteId));
+  inflight.set(noteId, run);
+  const cleanup = () => {
+    if (inflight.get(noteId) === run) inflight.delete(noteId);
+  };
+  run.then(cleanup, cleanup);
+  return run;
+}
+
+const logFailure = (noteId: string) => (err: unknown) =>
+  console.error(`[rag] Failed to reindex note ${noteId}:`, (err as Error).message);
 
 /** Debounces reindexing so rapid autosaves only embed once. */
 export function scheduleReindex(appkit: AppKitInstance, noteId: string): void {
@@ -40,11 +74,77 @@ export function scheduleReindex(appkit: AppKitInstance, noteId: string): void {
     noteId,
     setTimeout(() => {
       pending.delete(noteId);
-      reindexNote(appkit, noteId).catch((err) =>
-        console.error(`[rag] Failed to reindex note ${noteId}:`, (err as Error).message)
-      );
+      indexNow(appkit, noteId).catch(logFailure(noteId));
     }, REINDEX_DELAY_MS)
   );
+}
+
+/** Indexes notes a few at a time; failures are logged, never thrown. */
+async function indexAll(appkit: AppKitInstance, noteIds: string[]): Promise<number> {
+  let failed = 0;
+  const queue = [...noteIds];
+  const worker = async () => {
+    for (let id = queue.shift(); id; id = queue.shift()) {
+      const log = logFailure(id);
+      await indexNow(appkit, id).catch((err) => {
+        failed++;
+        log(err);
+      });
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(INDEX_CONCURRENCY, queue.length) }, worker));
+  return failed;
+}
+
+/**
+ * Brings a user's most recently edited stale notes up to date before a
+ * question is answered. Best effort: gives up waiting after a timeout (the
+ * indexing carries on in the background) and never throws.
+ */
+export async function catchUpIndex(appkit: AppKitInstance, userId: string): Promise<void> {
+  try {
+    const { rows } = await appkit.lakebase.query<{ id: string }>(
+      `SELECT id FROM chromanote.notes WHERE user_id = $1 AND ${STALE} ORDER BY updated_at DESC LIMIT $2`,
+      [userId, CATCH_UP_LIMIT]
+    );
+    if (!rows.length) return;
+    let timer: NodeJS.Timeout | undefined;
+    await Promise.race([
+      indexAll(
+        appkit,
+        rows.map((r) => r.id)
+      ),
+      new Promise((resolve) => (timer = setTimeout(resolve, CATCH_UP_TIMEOUT_MS))),
+    ]);
+    clearTimeout(timer);
+  } catch (err) {
+    console.error(`[rag] Catch-up indexing failed for user ${userId}:`, (err as Error).message);
+  }
+}
+
+/** Indexes every stale note, e.g. ones whose debounced reindex was lost to a restart. */
+export async function backfillIndex(appkit: AppKitInstance): Promise<void> {
+  try {
+    for (;;) {
+      const { rows } = await appkit.lakebase.query<{ id: string }>(
+        `SELECT id FROM chromanote.notes WHERE ${STALE} ORDER BY updated_at DESC LIMIT $1`,
+        [BACKFILL_PAGE]
+      );
+      if (!rows.length) return;
+      const failed = await indexAll(
+        appkit,
+        rows.map((r) => r.id)
+      );
+      // Stop rather than spin on notes that keep failing; questions retry them.
+      if (failed > 0) {
+        console.warn(`[rag] Backfill stopped with ${failed} note(s) still unindexed`);
+        return;
+      }
+      if (rows.length < BACKFILL_PAGE) return;
+    }
+  } catch (err) {
+    console.error('[rag] Backfill failed:', (err as Error).message);
+  }
 }
 
 export async function removeChunks(appkit: AppKitInstance, noteId: string): Promise<void> {
