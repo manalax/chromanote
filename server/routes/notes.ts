@@ -2,10 +2,12 @@ import { z } from 'zod';
 import { parseWikilinks } from '../../shared/wikilinks';
 import { type AppKitInstance, HttpError, getUserId, route } from '../lib/appkit';
 import { removeChunks, scheduleReindex } from '../lib/rag';
+import { snapshotNote } from '../lib/revisions';
 import { positionBetween } from '../lib/order';
 import { BOARD_COLUMNS, normTitle } from '../lib/schema';
 
 const Id = z.string().uuid();
+const RevisionId = z.coerce.number().int().positive();
 const Color = z.string().regex(/^(#[0-9a-fA-F]{6}|[a-z]+)$/);
 const Font = z.enum(['inter', 'lora', 'mono', 'caveat']);
 const Priority = z.number().int().min(0).max(4);
@@ -276,6 +278,7 @@ export function registerNoteRoutes(appkit: AppKitInstance) {
         }
         if (archived !== undefined) sets.push(`archived_at = ${archived ? 'COALESCE(archived_at, NOW())' : 'NULL'}`);
         if (sets.length === 0) throw new HttpError(400, 'Nothing to update');
+        if (fields.title !== undefined || fields.body !== undefined) await snapshotNote(appkit, userId, id, 'edit');
 
         const { rows } = await appkit.lakebase.query(
           `UPDATE chromanote.notes SET ${sets.join(', ')}, updated_at = NOW()
@@ -416,5 +419,64 @@ export function registerNoteRoutes(appkit: AppKitInstance) {
         res.json(rows);
       })
     );
+
+    app.get(
+      '/api/notes/:id/revisions',
+      route('list revisions', async (req, res) => {
+        const userId = getUserId(req);
+        const id = parseId(req.params.id);
+        const { rows } = await appkit.lakebase.query(
+          `SELECT id, title, reason, created_at, length(body) AS chars
+           FROM chromanote.note_revisions WHERE note_id = $1 AND user_id = $2 ORDER BY id DESC`,
+          [id, userId]
+        );
+        res.json(rows);
+      })
+    );
+
+    app.get(
+      '/api/notes/:id/revisions/:revId',
+      route('get revision', async (req, res) => {
+        res.json(await getRevision(appkit, getUserId(req), parseId(req.params.id), req.params.revId));
+      })
+    );
+
+    app.post(
+      '/api/notes/:id/revisions/:revId/restore',
+      route('restore revision', async (req, res) => {
+        const userId = getUserId(req);
+        const id = parseId(req.params.id);
+        const revision = await getRevision(appkit, userId, id, req.params.revId);
+        // Keep the text being replaced, so the restore itself can be undone.
+        await snapshotNote(appkit, userId, id, 'restore');
+        const { rows } = await appkit.lakebase.query(
+          `UPDATE chromanote.notes SET title = $3, body = $4, updated_at = NOW()
+           WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL RETURNING id`,
+          [id, userId, revision.title, revision.body]
+        );
+        if (!rows[0]) throw new HttpError(404, 'Note not found');
+        await syncLinks(appkit, id, revision.body);
+        scheduleReindex(appkit, id);
+        res.json(await getNote(appkit, userId, id));
+      })
+    );
   });
+}
+
+async function getRevision(appkit: AppKitInstance, userId: string, noteId: string, rawRevId: unknown) {
+  const revId = RevisionId.safeParse(rawRevId);
+  if (!revId.success) throw new HttpError(400, 'Invalid revision id');
+  const { rows } = await appkit.lakebase.query<{
+    id: string;
+    title: string;
+    body: string;
+    reason: string;
+    created_at: Date;
+  }>(
+    `SELECT id, title, body, reason, created_at FROM chromanote.note_revisions
+     WHERE id = $1 AND note_id = $2 AND user_id = $3`,
+    [revId.data, noteId, userId]
+  );
+  if (!rows[0]) throw new HttpError(404, 'Revision not found');
+  return rows[0];
 }

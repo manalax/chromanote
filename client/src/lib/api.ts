@@ -33,6 +33,20 @@ export interface Note extends NoteBase {
   body: string;
 }
 
+export type RevisionReason = 'edit' | 'rename' | 'link' | 'restore';
+
+export interface RevisionSummary {
+  id: string;
+  title: string;
+  reason: RevisionReason;
+  created_at: string;
+  chars: number;
+}
+
+export interface Revision extends Omit<RevisionSummary, 'chars'> {
+  body: string;
+}
+
 export interface NoteRef {
   id: string;
   title: string;
@@ -149,6 +163,9 @@ export const api = {
     }),
   emptyTrash: () => request<void>('DELETE', '/api/notes/trash'),
   backlinks: (id: string) => request<NoteRef[]>('GET', `/api/notes/${id}/backlinks`),
+  listRevisions: (id: string) => request<RevisionSummary[]>('GET', `/api/notes/${id}/revisions`),
+  getRevision: (id: string, revId: string) => request<Revision>('GET', `/api/notes/${id}/revisions/${revId}`),
+  restoreRevision: (id: string, revId: string) => request<Note>('POST', `/api/notes/${id}/revisions/${revId}/restore`),
   titles: () => request<NoteRef[]>('GET', '/api/notes/titles'),
   resolve: (title: string) => request<{ id: string; created: boolean }>('POST', '/api/notes/resolve', { title }),
   graph: () => request<Graph>('GET', '/api/graph'),

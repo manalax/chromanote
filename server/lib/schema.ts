@@ -123,6 +123,17 @@ const STATEMENTS = [
      FROM chromanote.notes WHERE board_col IS NULL
    ) r
    WHERE chromanote.notes.id = r.id`,
+  // Past versions of a note's title and body (see server/lib/revisions.ts).
+  `CREATE TABLE IF NOT EXISTS chromanote.note_revisions (
+    id BIGSERIAL PRIMARY KEY,
+    note_id UUID NOT NULL REFERENCES chromanote.notes(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT 'edit',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS note_revisions_note_idx ON chromanote.note_revisions (note_id, id DESC)`,
 ];
 
 export async function setupSchema(appkit: AppKitInstance) {

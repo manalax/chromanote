@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { addRelatedLink, normalizeTitle, parseWikilinks, renameLinks, unlinkTarget } from '../../shared/wikilinks';
 import { type AppKitInstance, HttpError, getUserId, route } from '../lib/appkit';
 import { scheduleReindex } from '../lib/rag';
+import { type RevisionReason, snapshotNote } from '../lib/revisions';
 import { normTitle } from '../lib/schema';
 import { getNote, parseId, syncLinks } from './notes';
 
@@ -30,8 +31,9 @@ async function ownedNotes(appkit: AppKitInstance, userId: string, ids: string[])
   return found;
 }
 
-/** Saves a new body and refreshes its derived link rows and embeddings. */
-async function saveBody(appkit: AppKitInstance, id: string, body: string) {
+/** Saves a new body (keeping the old one in history) and refreshes its derived link rows and embeddings. */
+async function saveBody(appkit: AppKitInstance, userId: string, id: string, body: string, reason: RevisionReason) {
+  await snapshotNote(appkit, userId, id, reason);
   await appkit.lakebase.query('UPDATE chromanote.notes SET body = $2, updated_at = NOW() WHERE id = $1', [id, body]);
   await syncLinks(appkit, id, body);
   scheduleReindex(appkit, id);
@@ -80,7 +82,7 @@ export function registerGraphRoutes(appkit: AppKitInstance) {
           res.json({ added: false, reason: 'exists' });
           return;
         }
-        await saveBody(appkit, source_id, addRelatedLink(source.body, target.title));
+        await saveBody(appkit, userId, source_id, addRelatedLink(source.body, target.title), 'link');
         res.status(201).json({ added: true });
       })
     );
@@ -95,7 +97,7 @@ export function registerGraphRoutes(appkit: AppKitInstance) {
         const notes = await ownedNotes(appkit, userId, [source_id, target_id]);
         const source = notes.get(source_id)!;
         const body = unlinkTarget(source.body, notes.get(target_id)!.title);
-        if (body !== source.body) await saveBody(appkit, source_id, body);
+        if (body !== source.body) await saveBody(appkit, userId, source_id, body, 'link');
         res.status(204).send();
       })
     );
@@ -139,6 +141,7 @@ export function registerGraphRoutes(appkit: AppKitInstance) {
         const newTitle = parsed.data.title.replace(/\s+/g, ' ');
         const note = (await ownedNotes(appkit, userId, [id])).get(id)!;
 
+        await snapshotNote(appkit, userId, id, 'rename');
         await appkit.lakebase.query('UPDATE chromanote.notes SET title = $2, updated_at = NOW() WHERE id = $1', [
           id,
           newTitle,
@@ -157,7 +160,7 @@ export function registerGraphRoutes(appkit: AppKitInstance) {
           for (const ref of rows) {
             const body = renameLinks(ref.body, note.title, newTitle);
             if (body !== ref.body) {
-              await saveBody(appkit, ref.id, body);
+              await saveBody(appkit, userId, ref.id, body, 'link');
               rewritten++;
             }
           }

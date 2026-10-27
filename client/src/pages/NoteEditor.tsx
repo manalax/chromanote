@@ -9,6 +9,7 @@ import {
   Columns2,
   Eye,
   Flag,
+  History,
   ImagePlus,
   Link2,
   PenLine,
@@ -43,7 +44,7 @@ import {
   TooltipTrigger,
   useIsMobile,
 } from '@databricks/appkit-ui/react';
-import { ApiError, api, type FontKey, type Note, type NoteRef, type Priority } from '@/lib/api';
+import { ApiError, api, type FontKey, type Note, type NoteRef, type Priority, type Revision } from '@/lib/api';
 import { DEFAULT_SURFACE, TEXT_SWATCHES, noteColors } from '@/lib/colors';
 import { useData } from '@/lib/data';
 import { FONTS, fontFamily } from '@/lib/fonts';
@@ -57,6 +58,7 @@ import { PRIORITIES, formatDateTime, formatDue, formatRelative } from '@/lib/met
 import { useNow } from '@/lib/useNow';
 import { TagPicker } from '@/components/TagPicker';
 import { MicButton } from '@/components/MicButton';
+import { NoteHistory } from '@/components/NoteHistory';
 import { useDictation } from '@/lib/dictation/useDictation';
 
 const AUTOSAVE_MS = 800;
@@ -85,6 +87,7 @@ export function NoteEditor() {
   const [saveState, setSaveState] = useState<SaveState>('saved');
   const [view, setView] = useState<View>('split');
   const [backlinks, setBacklinks] = useState<NoteRef[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const editorRef = useRef<MarkdownEditorHandle>(null);
 
   // Dictation: words go live into the editor; on stop the dictated text is tidied.
@@ -248,6 +251,43 @@ export function NoteEditor() {
     }
   };
 
+  /** Replaces the note's text with a past version; the replaced text stays in history. */
+  const restoreRevision = async (revision: Pick<Revision, 'id'>) => {
+    await flush();
+    try {
+      const restored = await api.restoreRevision(id, revision.id);
+      pending.current = {};
+      setNote(restored);
+      setTitle(restored.title);
+      setBody(restored.body);
+      setSaveState('saved');
+      void refreshTitles();
+      void api
+        .backlinks(id)
+        .then(setBacklinks)
+        .catch(() => undefined);
+      return true;
+    } catch (err) {
+      toast.error((err as Error).message);
+      return false;
+    }
+  };
+
+  const restoreFromHistory = async (revision: Revision) => {
+    if (!(await restoreRevision(revision))) return;
+    toast.success(`Restored the version from ${formatRelative(revision.created_at)}`, {
+      action: {
+        label: 'Undo',
+        // The newest revision is the text the restore replaced.
+        onClick: () =>
+          void api
+            .listRevisions(id)
+            .then(([latest]) => latest && restoreRevision(latest))
+            .catch((err: Error) => toast.error(err.message)),
+      },
+    });
+  };
+
   if (error) {
     return (
       <Empty className="mt-16">
@@ -343,6 +383,9 @@ export function NoteEditor() {
               <Eye className="size-4" />
             </ToggleGroupItem>
           </ToggleGroup>
+          <IconAction label="History" onClick={() => setHistoryOpen(true)}>
+            <History className="size-4" />
+          </IconAction>
           {!inTrash && (
             <>
               <IconAction label={note.archived_at ? 'Unarchive' : 'Archive'} onClick={() => void toggleArchive()}>
@@ -483,6 +526,16 @@ export function NoteEditor() {
       </div>
 
       <Backlinks notes={backlinks} />
+
+      <NoteHistory
+        open={historyOpen}
+        onOpenChange={setHistoryOpen}
+        noteId={note.id}
+        title={title}
+        body={body}
+        readOnly={inTrash}
+        onRestore={restoreFromHistory}
+      />
     </div>
   );
 }
