@@ -51,7 +51,7 @@ import { FONTS, fontFamily } from '@/lib/fonts';
 import { useSettings } from '@/lib/settings';
 import { cn } from '@/lib/utils';
 import { ColorPicker } from '@/components/ColorPicker';
-import { MarkdownEditor, type MarkdownEditorHandle } from '@/components/MarkdownEditor';
+import { MarkdownEditor, type MarkdownEditorHandle, type TextRange } from '@/components/MarkdownEditor';
 import { MarkdownPreview } from '@/components/MarkdownPreview';
 import { DueBadge, PriorityFlag, TagChip } from '@/components/NoteMeta';
 import { PRIORITIES, formatDateTime, formatDue, formatRelative } from '@/lib/meta';
@@ -88,6 +88,14 @@ export function NoteEditor() {
   const [view, setView] = useState<View>('split');
   const [backlinks, setBacklinks] = useState<NoteRef[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
+  /**
+   * What the text colour picker colours, fixed when it opens: the selected range,
+   * or null for the whole note. Kept after it closes, since the custom colour
+   * fields can commit late (on blur).
+   */
+  const colorTarget = useRef<TextRange | null>(null);
+  /** The ticked colour while `colorTarget` is a range; `false` when it isn't. */
+  const [selectionPick, setSelectionPick] = useState<string | null | undefined | false>(false);
   const editorRef = useRef<MarkdownEditorHandle>(null);
 
   // Dictation: words go live into the editor; on stop the dictated text is tidied.
@@ -334,6 +342,8 @@ export function NoteEditor() {
         value={body}
         noteId={note.id}
         placeholder="Start writing… use [[ to link a note, paste an image to upload it"
+        surface={surfaceBg}
+        isDark={isDark}
         onChange={(v) => {
           setBody(v);
           queue({ body: v });
@@ -345,7 +355,7 @@ export function NoteEditor() {
   const preview = (
     <div className="h-full overflow-y-auto px-6 py-5" style={{ fontFamily: font }}>
       {body.trim() ? (
-        <MarkdownPreview markdown={body} />
+        <MarkdownPreview markdown={body} surface={surfaceBg} />
       ) : (
         <p className="text-sm italic opacity-50">Nothing to preview yet.</p>
       )}
@@ -450,8 +460,20 @@ export function NoteEditor() {
             <DuePicker value={note.due_at} onChange={(due_at) => void saveMeta({ due_at })} />
             <ColorPicker value={note.color} onChange={(color) => void saveMeta({ color })} />
             <ColorPicker
-              value={note.text_color}
-              onChange={(text_color) => void saveMeta({ text_color })}
+              value={selectionPick === false ? note.text_color : selectionPick}
+              onOpenChange={(open) => {
+                if (!open) return;
+                const selection = editorRef.current?.selection() ?? null;
+                colorTarget.current = selection && { from: selection.from, to: selection.to };
+                setSelectionPick(selection ? selection.color : false);
+              }}
+              onChange={(text_color) => {
+                if (!colorTarget.current) return void saveMeta({ text_color });
+                const next = editorRef.current?.colorRange(colorTarget.current, text_color);
+                if (!next) return;
+                colorTarget.current = next;
+                setSelectionPick(text_color);
+              }}
               swatches={TEXT_SWATCHES}
               variant="text"
               surface={surfaceBg}

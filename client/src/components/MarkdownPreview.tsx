@@ -1,13 +1,16 @@
-import { memo, type ComponentProps } from 'react';
-import ReactMarkdown from 'react-markdown';
+import { memo, useMemo, type ComponentProps } from 'react';
+import ReactMarkdown, { type Options } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import rehypeSanitize from 'rehype-sanitize';
+import rehypeRaw from 'rehype-raw';
+import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import { visit } from 'unist-util-visit';
 import { Link, useNavigate } from 'react-router';
 import { toast } from 'sonner';
 import { WIKILINK_RE, normalizeTitle } from '../../../shared/wikilinks';
 import { api } from '@/lib/api';
+import { DEFAULT_SURFACE, textColor } from '@/lib/colors';
 import { useData } from '@/lib/data';
+import { useSettings } from '@/lib/settings';
 import { cn } from '@/lib/utils';
 
 const WIKI_PREFIX = '/wiki/';
@@ -96,17 +99,35 @@ function Anchor({ href, children, ...rest }: ComponentProps<'a'>) {
   );
 }
 
-const components = { a: Anchor };
+// Safe HTML only, plus the `data-color` of inline text colour spans.
+const schema = {
+  ...defaultSchema,
+  attributes: { ...defaultSchema.attributes, span: [...(defaultSchema.attributes?.span ?? []), 'dataColor'] },
+};
 const remarkPlugins = [remarkGfm, remarkWikilinks];
-const rehypePlugins = [rehypeSanitize];
+const rehypePlugins: Options['rehypePlugins'] = [rehypeRaw, [rehypeSanitize, schema]];
 
 export const MarkdownPreview = memo(function MarkdownPreview({
   markdown,
   className,
+  surface,
 }: {
   markdown: string;
   className?: string;
+  /** Background the text sits on, for resolving inline text colours. Defaults to the card surface. */
+  surface?: string;
 }) {
+  const { isDark } = useSettings();
+  const components = useMemo(() => {
+    const bg = surface ?? (isDark ? DEFAULT_SURFACE.dark : DEFAULT_SURFACE.light);
+    function Span({ node: _node, ...props }: ComponentProps<'span'> & { node?: unknown; 'data-color'?: string }) {
+      const value = props['data-color'];
+      const color = value ? textColor(value, bg, isDark) : null;
+      return <span {...props} style={color ? { ...props.style, color } : props.style} />;
+    }
+    return { a: Anchor, span: Span };
+  }, [surface, isDark]);
+
   return (
     <div className={cn('prose prose-sm sm:prose-base note-prose', className)}>
       <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={components}>

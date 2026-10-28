@@ -1,9 +1,11 @@
+import { stripColorSpans } from '../../shared/colorSpans';
+
 const TARGET_CHARS = 1000;
 const OVERLAP_CHARS = 150;
 
 /** Removes markdown noise that carries no meaning for retrieval. */
 function clean(body: string): string {
-  return body
+  return stripColorSpans(body)
     .replace(/!\[[^\]]*\]\([^)]*\)/g, '') // images
     .replace(/\[\[([^[\]|\n]+?)\|([^[\]\n]+?)\]\]/g, '$2') // aliased wikilinks -> label
     .replace(/\[\[([^[\]\n]+?)\]\]/g, '$1') // wikilinks -> title

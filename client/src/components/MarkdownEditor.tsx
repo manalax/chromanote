@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import {
@@ -8,13 +8,15 @@ import {
   type CompletionResult,
 } from '@codemirror/autocomplete';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
-import { Prec } from '@codemirror/state';
+import { Compartment, Facet, Prec, RangeSetBuilder } from '@codemirror/state';
 import { tags as t } from '@lezer/highlight';
-import { EditorView, keymap } from '@codemirror/view';
+import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate, keymap } from '@codemirror/view';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
+import { textColor } from '@/lib/colors';
 import { useData } from '@/lib/data';
 import { type DictatedSpan, dictationExtension, editorDictation } from '@/lib/dictation/cmDictation';
+import { applyColor, parseColorSpans, selectionColor } from '../../../shared/colorSpans';
 
 export interface MarkdownEditorHandle {
   insert: (text: string) => void;
@@ -30,6 +32,18 @@ export interface MarkdownEditorHandle {
     /** Stops tracking a span that won't be replaced (e.g. the tidy-up failed). */
     release: (span: DictatedSpan) => void;
   };
+  /** The current selection, or null when empty; `color` is undefined when it mixes colours. */
+  selection: () => (TextRange & { color: string | null | undefined }) | null;
+  /**
+   * Colours the text in `range`, or removes its colour when null. Returns the
+   * range the same text occupies afterwards, or null if nothing was coloured.
+   */
+  colorRange: (range: TextRange, color: string | null) => TextRange | null;
+}
+
+export interface TextRange {
+  from: number;
+  to: number;
 }
 
 interface MarkdownEditorProps {
@@ -38,6 +52,9 @@ interface MarkdownEditorProps {
   /** Note being edited; excluded from link suggestions. */
   noteId?: string;
   placeholder?: string;
+  /** Note surface and theme, used to resolve inline text colours. */
+  surface: string;
+  isDark: boolean;
 }
 
 // Markdown styling that follows the note's text colour (the default style uses
@@ -53,14 +70,58 @@ const markdownHighlight = HighlightStyle.define([
   { tag: [t.processingInstruction, t.meta, t.contentSeparator], color: faded },
 ]);
 
+type ColorResolver = (value: string) => string | null;
+const colorResolver = Facet.define<ColorResolver, ColorResolver>({ combine: (v) => v[0] ?? (() => null) });
+
+const fadedMark = Decoration.mark({ attributes: { style: `color: ${faded}` } });
+
+function colorDecorations(view: EditorView): DecorationSet {
+  const resolve = view.state.facet(colorResolver);
+  const builder = new RangeSetBuilder<Decoration>();
+  for (const span of parseColorSpans(view.state.doc.toString())) {
+    builder.add(span.from, span.innerFrom, fadedMark);
+    const color = resolve(span.color);
+    if (color && span.innerTo > span.innerFrom) {
+      builder.add(span.innerFrom, span.innerTo, Decoration.mark({ attributes: { style: `color: ${color}` } }));
+    }
+    builder.add(span.innerTo, span.to, fadedMark);
+  }
+  return builder.finish();
+}
+
+/** Shows `<span data-color>` text in its colour, with the tags faded. */
+const colorSpans = ViewPlugin.fromClass(
+  class {
+    decorations: DecorationSet;
+    constructor(view: EditorView) {
+      this.decorations = colorDecorations(view);
+    }
+    update(update: ViewUpdate) {
+      if (update.docChanged || update.startState.facet(colorResolver) !== update.state.facet(colorResolver)) {
+        this.decorations = colorDecorations(update.view);
+      }
+    }
+  },
+  { decorations: (v) => v.decorations }
+);
+
 const imageFiles = (list: FileList | null | undefined) =>
   Array.from(list ?? []).filter((f) => f.type.startsWith('image/'));
 
 export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(function MarkdownEditor(
-  { value, onChange, noteId, placeholder },
+  { value, onChange, noteId, placeholder, surface, isDark },
   ref
 ) {
   const cm = useRef<ReactCodeMirrorRef>(null);
+  const [colorCompartment] = useState(() => new Compartment());
+  const resolveColor = useMemo<ColorResolver>(() => (v) => textColor(v, surface, isDark), [surface, isDark]);
+  // Read once when the extensions are built; later changes are reconfigured below.
+  const resolveColorRef = useRef(resolveColor);
+  useEffect(() => {
+    if (resolveColorRef.current === resolveColor) return;
+    resolveColorRef.current = resolveColor;
+    cm.current?.view?.dispatch({ effects: colorCompartment.reconfigure(colorResolver.of(resolveColor)) });
+  }, [resolveColor, colorCompartment]);
   const { titles } = useData();
   // The completion source reads titles through a ref so the extension list
   // stays stable (re-creating extensions would reset the editor).
@@ -113,6 +174,27 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
         replace: (span, text) => withView((v) => editorDictation.replace(v, span, text), false),
         release: (span) => withView((v) => editorDictation.release(v, span), undefined),
       },
+      selection: () =>
+        withView((v) => {
+          const { from, to } = v.state.selection.main;
+          return from === to ? null : { from, to, color: selectionColor(v.state.doc.toString(), from, to) };
+        }, null),
+      // Takes an explicit range rather than the live selection: the picker can
+      // commit after it closes (e.g. a hex field's blur), when the selection may
+      // already have moved.
+      colorRange: (range, color) =>
+        withView((v) => {
+          const doc = v.state.doc.toString();
+          const from = Math.min(range.from, doc.length);
+          const to = Math.min(range.to, doc.length);
+          const edit = from === to ? null : applyColor(doc, from, to, color);
+          if (!edit) return null;
+          const next = { from: edit.selection.anchor, to: edit.selection.head };
+          // Re-committing the same colour (e.g. Enter, then blur) changes nothing.
+          if (doc.slice(edit.from, edit.to) === edit.insert) return next;
+          v.dispatch({ changes: { from: edit.from, to: edit.to, insert: edit.insert }, selection: edit.selection });
+          return next;
+        }, null),
     };
   });
 
@@ -135,6 +217,8 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
     return [
       markdown({ base: markdownLanguage }),
       syntaxHighlighting(markdownHighlight),
+      colorCompartment.of(colorResolver.of(resolveColorRef.current)),
+      colorSpans,
       dictationExtension,
       EditorView.lineWrapping,
       autocompletion({ override: [wikilinkSource], icons: false, defaultKeymap: false }),
@@ -160,7 +244,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       }),
     ];
     /* eslint-enable react-hooks/refs */
-  }, [noteId]);
+  }, [noteId, colorCompartment]);
 
   return (
     <CodeMirror
